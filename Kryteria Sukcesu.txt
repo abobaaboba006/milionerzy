@@ -1,0 +1,13 @@
+ryteria sukcesu:
+- podaje przykłady sił spójności i przylegania, opisuje zjawisko napięcia powierzchniowego
+- obliczam gęstość, znam jednostki, stosuje przekształcenie wzoru
+- wyznaczam gęstość substancji z jakiej wykonany jest przedmiot o regularnym kształcie oraz nieregularnym kształcie
+- posługuje się pojęciem ciśnienia, znam wzór i jednostkę, stosuje w obliczeniach
+- posługuje się pojęciem ciśnienia atmosferycznego
+- posługuje się prawem Pascala
+- znam wzór na ciśnienie hydrostatyczne, wiem od czego zależy
+- opisuje warunki pływania ciał na podstawie analizy ich gęstości
+- posługuje się pojęciem siły wyporu
+- demonstruje prawo Archimedesa, wyznaczam wartość siły wyporu, znam wzór
+- zapisuje wynik zaokrąglony do zadanej liczby cyfr znaczących
+- dokonuje zamiany jednostek kwadratowych i sześciennych, jednostki Pascala

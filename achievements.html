@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Milionerzy - Osiagniecia</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="spotlight"></div>
+    <div class="stars"></div>
+
+    <nav class="nav-back">
+        <a href="index.html">&#8592; Powrot do menu</a>
+    </nav>
+
+    <div class="container">
+        <div class="achievements-container">
+            <h1 class="achievements-title">Osiagniecia</h1>
+            <p class="achievements-subtitle">Odblokuj wszystkie, aby stac sie prawdziwym mistrzem!</p>
+
+            <div class="achievements-stats">
+                <span>Odblokowane: <strong id="achievements-count">0</strong> / <strong id="achievements-total">13</strong></span>
+            </div>
+
+            <div class="achievements-grid" id="achievements-grid">
+                <!-- Osiagniecia beda generowane przez JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="js/storage.js"></script>
+    <script src="js/achievements.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            renderAchievements();
+            applyTheme();
+        });
+
+        function renderAchievements() {
+            const grid = document.getElementById('achievements-grid');
+            const countEl = document.getElementById('achievements-count');
+            const totalEl = document.getElementById('achievements-total');
+
+            if (!grid || typeof Achievements === 'undefined') return;
+
+            const allAchievements = Achievements.getAllWithStatus();
+            const unlockedCount = allAchievements.filter(a => a.unlocked).length;
+
+            countEl.textContent = unlockedCount;
+            totalEl.textContent = allAchievements.length;
+
+            grid.innerHTML = '';
+
+            allAchievements.forEach(achievement => {
+                const card = document.createElement('div');
+                card.className = `achievement-card ${achievement.unlocked ? 'unlocked' : 'locked'}`;
+
+                let progressHtml = '';
+                if (!achievement.unlocked && achievement.progress) {
+                    const percent = Math.min(100, (achievement.progress.current / achievement.progress.target) * 100);
+                    progressHtml = `
+                        <div class="achievement-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${percent}%"></div>
+                            </div>
+                            <span class="progress-text">${achievement.progress.current} / ${achievement.progress.target}</span>
+                        </div>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div class="achievement-icon">${achievement.unlocked ? achievement.icon : '🔒'}</div>
+                    <div class="achievement-info">
+                        <h3 class="achievement-name">${achievement.name}</h3>
+                        <p class="achievement-description">${achievement.description}</p>
+                        ${progressHtml}
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        function applyTheme() {
+            const theme = Storage.getActiveTheme();
+            const background = Storage.getActiveBackground();
+
+            document.body.className = '';
+
+            if (theme && theme !== 'default') {
+                document.body.classList.add(`theme-${theme}`);
+            }
+
+            if (background && background !== 'default') {
+                document.body.classList.add(`bg-${background}`);
+            }
+
+            const starsElement = document.querySelector('.stars');
+            if (starsElement) {
+                starsElement.style.display = theme === 'cosmic' ? 'block' : 'none';
+            }
+        }
+    </script>
+</body>
+</html>
