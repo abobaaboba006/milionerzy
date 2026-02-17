@@ -501,12 +501,15 @@ body {
     height: 100%;
     background: rgba(0, 0, 0, 0.9);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 100;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s ease;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 20px;
 }
 
 .explanation-overlay.active {
@@ -525,6 +528,8 @@ body {
     box-shadow: 0 0 50px var(--primary-glow);
     transform: scale(0.8);
     transition: transform 0.3s ease;
+    margin: auto 0;
+    flex-shrink: 0;
 }
 
 .explanation-overlay.active .explanation-box {
@@ -1681,6 +1686,28 @@ body {
 
     .keyboard-hints {
         display: none;
+    }
+
+    .explanation-box {
+        padding: 20px 15px;
+        width: 95%;
+    }
+
+    .explanation-result {
+        font-size: 1.5rem;
+    }
+
+    .explanation-money {
+        font-size: 1.2rem;
+    }
+
+    .correct-answer-text {
+        font-size: 1.1rem;
+    }
+
+    .explanation-content {
+        padding: 12px;
+        margin-bottom: 15px;
     }
 
     .daily-section {
