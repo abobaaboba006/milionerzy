@@ -2,9 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'milionerzy-default-secret-change-me';
 
 // --- JSON file cache setup ---
 const dataDir = path.join(__dirname, 'data');
@@ -13,33 +15,199 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const cachePath = path.join(dataDir, 'cache.json');
+const usersPath = path.join(dataDir, 'users.json');
 
-function loadCache() {
+function loadJSON(filePath) {
     try {
-        if (fs.existsSync(cachePath)) {
-            return JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        if (fs.existsSync(filePath)) {
+            return JSON.parse(fs.readFileSync(filePath, 'utf8'));
         }
     } catch (e) {
-        console.error('[Cache] Error loading cache:', e.message);
+        console.error(`[JSON] Error loading ${filePath}:`, e.message);
     }
     return {};
 }
 
-function saveCache(cache) {
+function saveJSON(filePath, data) {
     try {
-        fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
     } catch (e) {
-        console.error('[Cache] Error saving cache:', e.message);
+        console.error(`[JSON] Error saving ${filePath}:`, e.message);
     }
 }
 
-const cache = loadCache();
+const cache = loadJSON(cachePath);
+const users = loadJSON(usersPath);
 
 // --- Middleware ---
 app.use(express.json({ limit: '10mb' }));
+
+// Serve HTML files with GOOGLE_CLIENT_ID injected
+app.get(['/', '/index.html', '/game.html', '/shop.html', '/achievements.html'], (req, res) => {
+    let fileName = req.path === '/' ? 'index.html' : req.path.slice(1);
+    const filePath = path.join(__dirname, fileName);
+    try {
+        let html = fs.readFileSync(filePath, 'utf8');
+        html = html.replace('GOOGLE_CLIENT_ID_PLACEHOLDER', process.env.GOOGLE_CLIENT_ID || '');
+        res.type('html').send(html);
+    } catch (e) {
+        res.status(404).send('Not found');
+    }
+});
+
 app.use(express.static(__dirname));
 
-// --- Gemini prompt builder (moved from client) ---
+// Auth middleware - extracts user from JWT if present
+function authOptional(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.slice(7);
+        try {
+            req.user = jwt.verify(token, JWT_SECRET);
+        } catch (e) {
+            // Invalid token - continue without user
+        }
+    }
+    next();
+}
+
+function authRequired(req, res, next) {
+    authOptional(req, res, () => {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Musisz byc zalogowany.' });
+        }
+        next();
+    });
+}
+
+// --- Auth Routes ---
+
+// POST /api/auth/google - Verify Google ID token and return JWT
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        const { credential } = req.body;
+        if (!credential) {
+            return res.status(400).json({ error: 'Brak tokenu Google.' });
+        }
+
+        const clientId = process.env.GOOGLE_CLIENT_ID;
+        if (!clientId) {
+            return res.status(500).json({ error: 'Brak GOOGLE_CLIENT_ID na serwerze.' });
+        }
+
+        // Verify Google ID token via Google's tokeninfo endpoint
+        const verifyUrl = `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`;
+        const verifyRes = await fetch(verifyUrl);
+
+        if (!verifyRes.ok) {
+            return res.status(401).json({ error: 'Nieprawidlowy token Google.' });
+        }
+
+        const payload = await verifyRes.json();
+
+        // Verify the token is for our app
+        if (payload.aud !== clientId) {
+            return res.status(401).json({ error: 'Token nie jest dla tej aplikacji.' });
+        }
+
+        const googleId = payload.sub;
+        const email = payload.email;
+        const name = payload.name || email.split('@')[0];
+        const picture = payload.picture || '';
+
+        // Create/update user
+        if (!users[googleId]) {
+            users[googleId] = {
+                googleId,
+                email,
+                name,
+                picture,
+                createdAt: new Date().toISOString(),
+                progress: null
+            };
+            console.log(`[Auth] New user: ${name} (${email})`);
+        } else {
+            users[googleId].name = name;
+            users[googleId].picture = picture;
+            users[googleId].email = email;
+        }
+        users[googleId].lastLogin = new Date().toISOString();
+        saveJSON(usersPath, users);
+
+        // Create JWT
+        const token = jwt.sign(
+            { googleId, email, name, picture },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+        );
+
+        res.json({
+            token,
+            user: { googleId, email, name, picture }
+        });
+
+    } catch (err) {
+        console.error('[/api/auth/google ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/auth/me - Get current user info
+app.get('/api/auth/me', authRequired, (req, res) => {
+    const userData = users[req.user.googleId];
+    res.json({
+        user: {
+            googleId: req.user.googleId,
+            email: req.user.email,
+            name: req.user.name,
+            picture: req.user.picture
+        },
+        hasProgress: !!(userData && userData.progress)
+    });
+});
+
+// --- Progress Routes ---
+
+// POST /api/user/progress - Save user progress
+app.post('/api/user/progress', authRequired, (req, res) => {
+    try {
+        const { progress } = req.body;
+        if (!progress) {
+            return res.status(400).json({ error: 'Brak danych progresu.' });
+        }
+
+        const googleId = req.user.googleId;
+        if (users[googleId]) {
+            users[googleId].progress = progress;
+            users[googleId].lastSaved = new Date().toISOString();
+            saveJSON(usersPath, users);
+            res.json({ saved: true });
+        } else {
+            res.status(404).json({ error: 'Uzytkownik nie znaleziony.' });
+        }
+    } catch (err) {
+        console.error('[/api/user/progress SAVE ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/user/progress - Load user progress
+app.get('/api/user/progress', authRequired, (req, res) => {
+    try {
+        const googleId = req.user.googleId;
+        const userData = users[googleId];
+        if (userData && userData.progress) {
+            res.json({ progress: userData.progress });
+        } else {
+            res.json({ progress: null });
+        }
+    } catch (err) {
+        console.error('[/api/user/progress LOAD ERROR]', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- Gemini prompt builder ---
 function buildPrompt(className, context, hasImage) {
     let imageInstruction = '';
     if (hasImage) {
@@ -91,7 +259,7 @@ Pytanie prawda/falsz (id 56-65):
 {"id": N, "type": "truefalse", "category": "temat", "question": "stwierdzenie", "difficulty": 1|2|3, "correctAnswer": true|false, "explanation": "wyjasnienie"}`;
 }
 
-// --- Response parser (moved from client) ---
+// --- Response parser ---
 function parseResponse(text) {
     let cleaned = text.trim();
     if (cleaned.startsWith('```json')) {
@@ -162,8 +330,8 @@ function parseResponse(text) {
 
 // --- API Routes ---
 
-// POST /api/generate - Generate or return cached questions
-app.post('/api/generate', async (req, res) => {
+// POST /api/generate - Generate or return cached questions (AUTH REQUIRED)
+app.post('/api/generate', authRequired, async (req, res) => {
     try {
         const { className, context, imageBase64, mimeType } = req.body;
 
@@ -175,7 +343,7 @@ app.post('/api/generate', async (req, res) => {
         const hasImage = !!(imageBase64 && mimeType);
         const cacheKey = `${className.trim()}|||${normalizedContext}`;
 
-        // Check cache (only if no image - images can't be reliably cached)
+        // Check cache (only if no image)
         if (!hasImage && cache[cacheKey]) {
             console.log(`[Cache HIT] ${className} | context: ${normalizedContext.slice(0, 50)}...`);
             return res.json({ questions: cache[cacheKey].questions, cached: true });
@@ -210,7 +378,7 @@ app.post('/api/generate', async (req, res) => {
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
-        console.log(`[Gemini] Generating for: ${className} | context: ${normalizedContext.slice(0, 50)}...`);
+        console.log(`[Gemini] Generating for: ${className} (user: ${req.user.email})`);
 
         const response = await fetch(geminiUrl, {
             method: 'POST',
@@ -240,7 +408,7 @@ app.post('/api/generate', async (req, res) => {
                 questionCount: questions.length,
                 createdAt: new Date().toISOString()
             };
-            saveCache(cache);
+            saveJSON(cachePath, cache);
             console.log(`[Cache SAVE] ${className} | ${questions.length} questions`);
         } catch (cacheErr) {
             console.error('[Cache ERROR]', cacheErr.message);

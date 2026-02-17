@@ -1,6 +1,11 @@
 // main.js - Logika menu glownego
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Init auth first
+    if (typeof Auth !== 'undefined') {
+        Auth.init();
+    }
+
     // Aktualizacja wyswietlania pieniedzy
     updateMoneyDisplay();
     updateStatsDisplay();
@@ -23,6 +28,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Class selector
     renderClassCards();
+
+    // Update auth UI after class cards are rendered
+    if (typeof Auth !== 'undefined') {
+        Auth.updateUI();
+    }
 });
 
 function updateMoneyDisplay() {

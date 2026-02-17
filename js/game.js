@@ -702,6 +702,11 @@ const Game = {
         }
 
         this.elements.endScreen.classList.add('active');
+
+        // Save progress to server if logged in
+        if (typeof Auth !== 'undefined') {
+            Auth.scheduleSave();
+        }
     },
 
     // === KOLA RATUNKOWE ===

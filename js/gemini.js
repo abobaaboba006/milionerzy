@@ -9,11 +9,20 @@ const Gemini = {
             requestBody.mimeType = mimeType;
         }
 
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(typeof Auth !== 'undefined' ? Auth.getHeaders() : {})
+        };
+
         const response = await fetch('/api/generate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify(requestBody)
         });
+
+        if (response.status === 401) {
+            throw new Error('Musisz byc zalogowany, aby generowac pytania.');
+        }
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
