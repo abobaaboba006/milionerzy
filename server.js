@@ -39,6 +39,50 @@ function saveJSON(filePath, data) {
 const cache = loadJSON(cachePath);
 const users = loadJSON(usersPath);
 
+// --- Moderacja tresci (filtr nieodpowiednich pytan) ---
+// Lista zablokowanych rdzeni slow. Dopasowanie obejmuje odmiany (prefiks slowa),
+// wiec np. "jeb" zlapie "jebac", "jebany" itd. Tekst jest normalizowany
+// (male litery, bez polskich znakow), by ominac proste obejscia.
+const BLOCKED_TERMS = [
+    // wulgaryzmy PL
+    'kurw', 'chuj', 'chuja', 'chujowy', 'huj', 'pierdol', 'pierdal', 'jeb', 'pizd',
+    'skurwiel', 'skurwysyn', 'cipa', 'cipy', 'kutas', 'dziwk', 'szmata', 'spierdal',
+    'wypierdal', 'zjeb', 'wyjeb', 'najeb',
+    // tresci seksualne
+    'seks', 'sex', 'porno', 'porn', 'penis', 'wagin', 'erekcj', 'masturbacj',
+    'orgazm', 'erotyk', 'erotyczn', 'pedofil', 'molestow', 'nagie cialo',
+    // przemoc / substancje / mowa nienawisci
+    'narkotyk', 'kokain', 'heroin', 'marihuan', 'amfetamin', 'samobojstw', 'samobojcz',
+    'terroryzm', 'terrorysc', 'nazizm', 'hitler',
+    // ang. wulgaryzmy / mowa nienawisci
+    'fuck', 'shit', 'bitch', 'asshole', 'dick', 'pussy', 'cunt', 'nigger', 'faggot', 'rape'
+];
+
+// Normalizacja: male litery, usuniecie diakrytykow, tylko litery/cyfry/spacje
+function normalizeText(text) {
+    return String(text || '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// Zwraca dopasowany rdzen jesli tekst zawiera nieodpowiednia tresc, w przeciwnym razie null
+function findInappropriate(text) {
+    const normalized = normalizeText(text);
+    if (!normalized) return null;
+    for (const term of BLOCKED_TERMS) {
+        const t = normalizeText(term);
+        if (!t) continue;
+        // Granica slowa z lewej + prefiks (obejmuje odmiany). Wieloczlonowe rdzenie tez zadzialaja.
+        const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${escaped}`, 'i');
+        if (re.test(normalized)) return term;
+    }
+    return null;
+}
+
 // --- Middleware ---
 app.use(express.json({ limit: '10mb' }));
 
@@ -240,6 +284,11 @@ ZADANIE: Wygeneruj dokladnie 65 pytan po polsku:
 - 55 pytan wielokrotnego wyboru (4 odpowiedzi, dokladnie 1 poprawna)
 - 10 pytan prawda/falsz (id 56-65)
 
+BEZPIECZENSTWO TRESCI (KRYTYCZNE):
+- To quiz szkolny dla dzieci i mlodziezy. Wszystkie pytania, odpowiedzi i wyjasnienia MUSZA byc odpowiednie dla ucznia.
+- Nie generuj tresci wulgarnych, seksualnych, brutalnych, dotyczacych narkotykow, mowy nienawisci ani niczego nieodpowiedniego dla szkoly.
+- Jesli zakres materialu od ucznia zawiera cokolwiek nieodpowiedniego, ZIGNORUJ te czesc i trzymaj sie wylacznie tresci edukacyjnych zgodnych z przedmiotem.
+
 WAZNE ZASADY:
 1. Wszystkie pytania MUSZA byc scisle powiazane z podanym przedmiotem i zakresem materialu
 2. Jesli podano zdjecie kryteriow sukcesu - pytania musza pokrywac KAZDY punkt z tych kryteriow
@@ -284,9 +333,20 @@ function parseResponse(text) {
     }
 
     const validated = [];
+    let blockedCount = 0;
     for (let i = 0; i < parsed.length; i++) {
         const q = parsed[i];
         if (!q || !q.question) continue;
+
+        // Filtr moderacji: odrzuc pytanie, jesli tresc/odpowiedzi/wyjasnienie sa nieodpowiednie
+        const answersText = Array.isArray(q.answers)
+            ? q.answers.map(a => a && a.text).join(' ')
+            : '';
+        const combined = `${q.question} ${q.category || ''} ${answersText} ${q.explanation || ''}`;
+        if (findInappropriate(combined)) {
+            blockedCount++;
+            continue;
+        }
 
         if (!q.id) q.id = i + 1;
         if (!q.category) q.category = 'Ogolne';
@@ -321,6 +381,10 @@ function parseResponse(text) {
         }
     }
 
+    if (blockedCount > 0) {
+        console.log(`[Moderacja] Odrzucono ${blockedCount} nieodpowiednich pytan.`);
+    }
+
     if (validated.length < 10) {
         throw new Error(`Za malo prawidlowych pytan (${validated.length}). Potrzeba minimum 10.`);
     }
@@ -341,6 +405,16 @@ app.post('/api/generate', authRequired, async (req, res) => {
 
         const normalizedContext = (context || '').trim();
         const hasImage = !!(imageBase64 && mimeType);
+
+        // Moderacja tresci wejsciowej od ucznia (przed wyslaniem do Gemini)
+        const badInput = findInappropriate(className) || findInappropriate(normalizedContext);
+        if (badInput) {
+            console.log(`[Moderacja] Zablokowano nieodpowiednia tresc wejsciowa (user: ${req.user.email})`);
+            return res.status(400).json({
+                error: 'Wykryto nieodpowiednia tresc w temacie lub zakresie materialu. Podaj wylacznie temat szkolny.'
+            });
+        }
+
         const cacheKey = `${className.trim()}|||${normalizedContext}`;
 
         // Check cache (only if no image)

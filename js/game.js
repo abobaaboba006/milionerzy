@@ -157,6 +157,11 @@ const Game = {
 
     // Start gry
     startGame() {
+        // Uruchom muzyke pytan w grze (auto-play, chyba ze uzytkownik ja wyciszyl)
+        if (typeof Sound !== 'undefined') {
+            Sound.startGameMusic();
+        }
+
         // Zaladuj pytania z cache (jesli sa wygenerowane przez AI)
         if (typeof loadCachedQuestions === 'function') {
             loadCachedQuestions();
